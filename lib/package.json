@@ -1,0 +1,27 @@
+{
+  "name": "@woojs/woo",
+  "version": "2.0.4",
+  "description": "woo web components framework",
+  "main": "index.js",
+  "scripts": {
+    "w": "esbuild src/index.ts src/worker/worker.ts --bundle --outdir=build  --sourcemap=inline  --watch --servedir=. --format=iife",
+    "d": "esbuild src/index.ts  src/worker/worker.ts --bundle --outdir=./dev/woo/ --sourcemap=inline --format=iife",
+    "b": "esbuild src/index.ts  src/worker.ts --bundle --minify --outdir=./dist/ --analyze ",
+    "pub": "cd dist && npm --registry \"https://registry.npmjs.org/\" publish --access public",
+    "test": "cypress open",
+    "init-global":"pnpm i -g cypress esbuild typescript"
+  },
+  "keywords": [
+    "webcomponents",
+    "woo",
+    "woojs",
+    "web",
+    "components"
+  ],
+  "author": "zhfjyq@gmail.com",
+  "license": "MIT",
+  "devDependencies": {
+    "cypress": "^13.12.0",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,4 +1,3 @@
-![](/resources/woojs-b.png)
+![](/resources/woo-logo.png)
 
 ## WOO WebCompones Framework v2.0
-WooJs

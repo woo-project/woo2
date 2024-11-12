@@ -1,0 +1,27 @@
+<template a1="1" a2="2">
+    <style>
+        :host {
+            display: block;
+            border: 1px solid blue;
+            padding: 10px;
+            margin: px;
+        }
+
+        .test {
+            background-color: aqua;
+        }
+    </style>
+    <h1 $test="a1" >WOO-APP</h1>
+    <div :>a1=${a1}</div>
+
+    <div :>a2=${a2}</div>
+
+    <com-test></com-test>
+    <div>
+        <h3 style="color: red;">1111</h3>
+        测试数据
+        <h4 class="test">2222</h4>
+        <h5>3333</h5>
+    </div>
+    <!-- 注释 -->
+</template>

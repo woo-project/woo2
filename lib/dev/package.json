@@ -1,0 +1,6 @@
+{
+    "name": "@woojs/ui",
+    "version": "2.0.4",
+    "description": "woo ui",
+    "main": "index.js"
+}

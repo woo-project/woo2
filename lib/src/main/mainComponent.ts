@@ -12,6 +12,7 @@ const log = Logger('WOO:MainComponent');
 export const componentRegistry = new Map<string, MainComponent>();
 
 export class BaseComponent extends HTMLElement {
+  private _scripts: HTMLScriptElement[] = [];
   constructor() {
     super();
     // 读取_cid属性,获取组件内容,添加到shadowRoot
@@ -27,12 +28,33 @@ export class BaseComponent extends HTMLElement {
           this.setAttribute(k, initData.attrs[k]);
         }
         this.attachShadow({ mode: 'open' }).innerHTML = initData.content;
+
+        // 如果有script标签,则执行script标签内容
+        this.shadowRoot?.querySelectorAll('script').forEach((el) => {
+          console.log("发现脚本:",el);
+          el.remove()
+         this._scripts.push(el);
+
+//          this.shadowRoot?.appendChild(el);
+          // el.replaceWith(el);
+        })
+
       } else {
         log.error('BaseComponent', 'Component not found', cid);
       }
     }
   }
   connectedCallback() {
+    // 组件内部script需要在dom初始化并连接成功后执行,每个组件实例都会执行一次此脚本
+    // 执行脚本时，可使用$component引用当前组件实例
+    (window as any).$component = this;
+    this._scripts.forEach((el) => {
+      // 执行脚本
+      const script = document.createElement('script');
+      script.textContent = el.textContent;
+      this.shadowRoot?.appendChild(script);
+    });
+    (window as any).$component=undefined;
     log.info('connectedCallback', this.tagName.toLowerCase());
     this.setAttribute('_ready', '');
   }

@@ -11,7 +11,10 @@
 
 let loggerlastTm = -1;
 
-const enableDebug = !!(globalThis?.localStorage?.getItem('__DEV'));
+
+
+
+const enableDebug = !!(globalThis?.localStorage?.getItem('__DEV') || new URLSearchParams(location.search).get('__DEV'))
 
 /**
  *

@@ -35,158 +35,112 @@ interface IMessageStruct {
 }
 
 const TIMEOUT = 500000;
-// type IMessageType = keyof IMessages;
-
-// /**
-//  * 消息类型定义,"W:"为Worker线程消息,"M:"为主线程消息
-//  */
-// interface IMessages {
-//   //========= 工作线程发起事件，主线程响应 =========
-
-//   // 当Worker线程准备好时,发送此消息,通知主线程Worker启动完成
-//   'W:Ready': {
-//     send: {};
-//     reply: {};
-//   };
-//   // 由于DomParse仅能在主线程调用，因此，当Worker线程需要解析Dom时，发送此消息到主线程，由主线程解析完毕后返回解析结果
-//   'W:TemplateParse': {
-//     send: { text: string };
-//     reply: { tpl: IElemJson };
-//   };
-//   // 注册一个WebComponent,主线程接收到此消息后,注册WebComponent,如果已经注册,返回失败
-//   // 'W:RegisterWebComponent': {
-//   //   send: { tag: string };
-//   //   reply: {
-//   //     success: boolean; // 如果注册成功,返回true,否则返回false(组件已经注册)
-//   //   };
-//   // };
-
-//   // 当Worker线程需要加载WebComponent元素时，发送此消息到主线程
-//   'W:RegisterComponent': {
-//     send: { relUrl: string; tag: string; attrs: { [key: string]: string } };
-//     reply: { elem?: { tag: string; attrs: { [key: string]: string } } };
-//   };
-
-//   //
-//   'W:UpdateElem': {
-//     send: { cid: string; eid: string; attrs: { [key: string]: string } };
-//     reply: {};
-//   };
-
-//   // ======= 主线程发起事件，工作线程响应 =========
-//   // 更新全局meta属性
-//   'M:SetGlobalMeta': {
-//     send: {
-//       meta: IElemJson[]; // 需要更新的meta属性列表
-//       htmlUrl?: string; // 当前页面的Url
-//     };
-//     reply: {};
-//   };
-//   // 请求加载元素,传入请求加载的元素标签和属性,一般用于在首页加载固定元素或者独立元素(无父元素)
-//   'M:LoadComponent': {
-//     send: { tag: string; attrs: { [k: string]: string }; relUrl: string };
-//     reply: { tag: string; attrs: { [key: string]: string }; content: string };
-//   };
-// }
 
 let _globalMessageId = isWorker ? 1000000 : 1;
 const _workerReadyDefer = new Defer<{}>();
+
+const _globalListeners = new Map<string, MessageBase<any, any>>();
+const _globalWaitReplies = new Map<number, Defer<any>>();
+
+
+globalMessageHandle.addEventListener('message', (ev) => {
+  const data = ev.data as IMessageStruct;
+  if (data.reply) {
+    // 处理应答消息
+    const reply = _globalWaitReplies.get(data.reply);
+    if (reply) {
+      _globalWaitReplies.delete(data.reply);
+      if (data.err) reply.reject(data.err);
+      else reply.reslove(data.data);
+    } else {
+      log.warn('message reply not found', data);
+    }
+  } else {
+    // 处理请求消息
+
+    const messager = _globalListeners.get(data.type);
+    if (messager) {
+      messager._listener?.call(messager, data.data).then((result: any) => {
+        globalMessageHandle.postMessage({
+          type: data.type,
+          reply: data.id,
+          data: result,
+        });
+      }).catch((err: any) => {
+        log.error(`onMessage ${data.type}`, err);
+        globalMessageHandle.postMessage({
+          reply: data.id,
+          err: err,
+        });
+      });
+    } else {
+      log.warn('Message.onMessage', 'listener not found', data);
+    }
+  }
+});
+
+
 
 /**
  * 实现Worker和主线程的消息通信,处理应答
  */
 export class MessageBase<TSend extends {}, TRecv extends {}> {
-  private _waitReply = new Map<number, { res: (data: any) => void; rej: (err: string) => void }>();
-  private _listeners = new Map<string, (data: any) => Promise<any>>();
 
+  _listener?: ((data: TSend) => Promise<TRecv>);
   constructor(private _msgName: string) {
-    globalMessageHandle.addEventListener('message', this._onMessage.bind(this));
-  }
+    _globalListeners.set(this._msgName, this);
 
-  private _onMessage(ev: MessageEvent) {
-    const data = ev.data as IMessageStruct;
-    if (data.reply) {
-      // 处理应答消息
-      const reply = this._waitReply.get(data.reply);
-      // log.info('<<= Reply Message ', data);
-      if (reply) {
-        if (data.err) reply.rej(data.err);
-        else reply.res(data.data);
-        this._waitReply.delete(data.reply);
-      } else {
-        log.warn('Message.onMessage', 'reply not found', data);
-      }
-    } else {
-      // 处理请求消息
-      // log.info('=>> Received Message', data);
-      const listener = this._listeners.get(data.type );
-      if (listener) {
-        listener(data.data)
-          .then((result: any) => {
-            globalMessageHandle.postMessage({
-              type: data.type,
-              reply: data.id,
-              data: result,
-            });
-          })
-          .catch((err: any) => {
-            log.error(`onMessage ${data.type}`, err);
-            globalMessageHandle.postMessage({
-              reply: data.id,
-              err: err,
-            });
-          });
-      } else {
-        log.warn('Message.onMessage', 'listener not found', data);
-      }
-    }
   }
 
   // 发送消息,并获取返回结果
   async send(data: TSend, transfer?: any[]): Promise<TRecv> {
+
+    const id = _globalMessageId++;
+    const type = this._msgName;
     if (!isWorker) {
       // 主线程，等待Worker准备好
       await _workerReadyDefer.result();
     }
-    const id = _globalMessageId++;
-    const type = this._msgName;
 
-    log.time(`MSG:${type}-${id}`);
 
-    let ret: any = await new Promise((res, rej) => {
-      this._waitReply.set(id, { res, rej });
-      // 超时处理
-      setTimeout(() => {
-        if (this._waitReply.has(id)) {
-          this._waitReply.delete(id);
-          rej('timeout');
-          // log.error('Message.send', 'timeout', type, data)
-        }
-      }, TIMEOUT);
-      // 发送消息
-      globalMessageHandle.postMessage(
-        {
-          type,
-          id,
-          data,
-        },
-        transfer
-      );
-    });
-    log.timeEnd(`MSG:${type}-${id}`);
+    const timeStart = Date.now();
+    log.info(`Message Send Type="${type}" Id=${id}`, data);
+
+    const defer = new Defer<TRecv>();
+    _globalWaitReplies.set(id, defer);
+    globalMessageHandle.postMessage(
+      {
+        type,
+        id,
+        data,
+      },
+      transfer
+    );
+    let ret = await defer.result(TIMEOUT);
+
+    log.info(`Message Reply Type="${type}" Id=${id}`,ret,`,tm=${Date.now() - timeStart}ms`);
 
     return ret;
   }
 
-  on( callback: (data:TSend) => Promise<TRecv>) {
-    this._listeners.set(this._msgName, callback);
+  on(callback: (data: TSend) => Promise<TRecv>) {
+    if (this._listener) {
+      throw new Error(`Message listener: ${this._msgName} already exists`);
+    }
+    log.info('Message listener', this._msgName);
+
+
+    this._listener = callback;
   }
 }
+
+
 
 // Worker 主动发送消息，主线程响应
 export const WorkerMessage = {
   // Worker线程准备好,发送此消息
   ready: new MessageBase<{}, {}>('W:Ready'),
+  
   // Worker线程请求解析模板
   templateParse: new MessageBase<{ text: string }, { tpl: IElemJson }>('W:TemplateParse'),
   // Worker线程请求注册WebComponent
@@ -198,8 +152,12 @@ export const WorkerMessage = {
   updateElem: new MessageBase<{ cid: string; eid: string; attrs: { [key: string]: string } }, {}>('W:UpdateElem'),
 };
 
+
+/**
+ * 定义主线程主动发送的消息
+ */
 export const MainMessage = {
-  // 设置全局meta属性
+  // 设置全局meta属性        
   setGlobalMeta: new MessageBase<
     {
       meta: IElemJson[]; // 需要更新的meta属性列表
@@ -214,6 +172,9 @@ export const MainMessage = {
   >('M:LoadComponent'),
 };
 
+
+
+// 同步worker，等待WorkerReady消息
 if (isWorker) {
   // Worker线程，发送Ready消息
   WorkerMessage.ready.send({}).then((data) => {
@@ -230,117 +191,3 @@ if (isWorker) {
     log.info('WorkerReady');
   });
 }
-
-// /**
-//  * 实现Worker和主线程的消息通信,处理应答
-//  */
-// export class Message {
-//   private _msgId = isWorker ? _globalMessageId : 1;
-//   private _waitReply = new Map<number, { res: (data: any) => void; rej: (err: string) => void }>();
-//   private _listeners = new Map<IMessageType, (data: any) => Promise<any>>();
-//   private _workerReadyDefer = new Defer<IMessageStruct>('WorkerReady');
-
-//   constructor() {
-//     globalMessageHandle.addEventListener('message', this.onMessage.bind(this));
-
-//     if (isWorker) {
-//       // Worker线程，发送WorkerReady消息
-//       this.send('W:Ready', {}).then((data) => {
-//         this._workerReadyDefer.reslove(data);
-//       });
-//     } else {
-//       // 主线程，等待WorkerReady消息
-//       this.on('W:Ready', async (data) => {
-//         this._workerReadyDefer.reslove(data);
-//         return {};
-//       });
-//       this._workerReadyDefer.result().then(() => {
-//         log.info('WorkerReady');
-//       });
-//     }
-//   }
-
-//   onMessage(ev: MessageEvent) {
-//     const data = ev.data as IMessageStruct;
-//     if (data.reply) {
-//       // 处理应答消息
-//       const reply = this._waitReply.get(data.reply);
-//       // log.info('<<= Reply Message ', data);
-//       if (reply) {
-//         if (data.err) reply.rej(data.err);
-//         else reply.res(data.data);
-//         this._waitReply.delete(data.reply);
-//       } else {
-//         log.warn('Message.onMessage', 'reply not found', data);
-//       }
-//     } else {
-//       // 处理请求消息
-//       // log.info('=>> Received Message', data);
-//       const listener = this._listeners.get(data.type as IMessageType);
-//       if (listener) {
-//         listener(data.data)
-//           .then((result: any) => {
-//             globalMessageHandle.postMessage({
-//               type: data.type,
-//               reply: data.id,
-//               data: result,
-//             });
-//           })
-//           .catch((err: any) => {
-//             log.error(`onMessage ${data.type}`, err);
-//             globalMessageHandle.postMessage({
-//               reply: data.id,
-//               err: err,
-//             });
-//           });
-//       } else {
-//         log.warn('Message.onMessage', 'listener not found', data);
-//       }
-//     }
-//   }
-
-//   // 发送消息,并获取返回结果
-//   async send<T extends IMessageType>(
-//     type: T,
-//     data: IMessages[T]['send'],
-//     transfer?: any[]
-//   ): Promise<IMessages[T]['reply']> {
-//     if (!isWorker) {
-//       // 主线程，等待Worker准备好
-//       await this._workerReadyDefer.result();
-//     }
-//     const id = this._msgId++;
-
-//     log.time(`MSG:${type}-${id}`);
-
-//     let ret: any = await new Promise((res, rej) => {
-//       this._waitReply.set(id, { res, rej });
-//       // 超时处理
-//       setTimeout(() => {
-//         if (this._waitReply.has(id)) {
-//           this._waitReply.delete(id);
-//           rej('timeout');
-//           // log.error('Message.send', 'timeout', type, data)
-//         }
-//       }, TIMEOUT);
-//       // 发送消息
-//       globalMessageHandle.postMessage(
-//         {
-//           type,
-//           id,
-//           data,
-//         },
-//         transfer
-//       );
-//     });
-//     log.timeEnd(`MSG:${type}-${id}`);
-
-//     return ret;
-//   }
-
-//   on<T extends IMessageType>(type: T, callback: (data: IMessages[T]['send']) => Promise<IMessages[T]['reply']>) {
-//     this._listeners.set(type, callback);
-//   }
-// }
-
-// export const message = new Message();

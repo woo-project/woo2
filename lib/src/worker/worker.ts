@@ -4,8 +4,8 @@ import { Logger } from "../logger";
 import { WorkerComponent } from "./workerComponents";
 import { workerMeta } from "./workerMeta";
 
+console.info("====> Woo Worker init:",self.location.href)
 const log = Logger("WOO:Worker")
-log.debug("Worker init")
 
 
 /**
@@ -24,7 +24,7 @@ MainMessage.setGlobalMeta.on(async (data) => {
 
 MainMessage.loadComponent.on(async (data) => {
     let tag = workerMeta.normalizeTag(data.tag,data.relUrl)
-    log.warn("==> start LoadElem:",data.tag, tag, data.attrs)
+    // log.warn("==> start LoadElem:",data.tag, tag, data.attrs)
 
     
     // 创建Worker组件实例
@@ -34,9 +34,8 @@ MainMessage.loadComponent.on(async (data) => {
     comp.renderContentHtml(htmlBuilder)
 
     let result =  { tag, attrs: comp.rootAttrs(), content: htmlBuilder.join('') }
-    log.warn("==> end LoadElem:",result)
+    // log.warn("==> end LoadElem:",result)
     
-
     return result;
 })
 

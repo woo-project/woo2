@@ -16,12 +16,26 @@
 
     <div :>a2=${a2}</div>
 
-    <com-test></com-test>
+    <!-- <com-test></com-test> -->
     <div>
         <h3 style="color: red;">1111</h3>
         测试数据
         <h4 class="test">2222</h4>
         <h5>3333</h5>
     </div>
+    <script type="text/javascript">
+        console.log('------->> 运行直接script:',$component);
+     </script>
+
     <!-- 注释 -->
+     <script scope=".">
+        console.log('------->> START APP script:',this.a1);
+
+        return class {
+            ccc = 100;
+            constructor() {
+                console.log('script constructor:',this.ccc);
+            }
+        }
+     </script>
 </template>

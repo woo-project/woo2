@@ -383,7 +383,7 @@ export class WorkerScope {
               return true;
             }
 
-            log.info('ObjectNewProp', obj, prop, value);
+//            log.info('ObjectNewProp', obj, prop, value);
 
             let oldValue = Reflect.get(obj, prop);
 

@@ -1,5 +1,5 @@
 import { WorkerMessage } from 'message';
-import { IElemJson, JsUtils, NetUtils } from '../common';
+import { Defer, IElemJson, JsUtils, NetUtils } from '../common';
 import { Logger } from '../logger';
 import { workerMeta } from './workerMeta';
 import { WorkerScope } from './workerScope';
@@ -30,29 +30,78 @@ interface ITplDescriptor {
   rootElem: IElemJson;
   relUrl: string;
 }
-const tplRegistry = new (class TplRegistry {
-  private _tplRegistry = new Map<string, ITplDescriptor>();
 
-  async get(tag: string): Promise<ITplDescriptor> {
-    if (!this._tplRegistry.has(tag)) {
-      let relPrefix = workerMeta.tagPathPrefix(tag);
-      let tplUrl = relPrefix + '.html';
-      let html = await NetUtils.httpGetText(tplUrl);
-      let result = await WorkerMessage.templateParse.send({ text: html });
-      
-      this._tplRegistry.set(tag, {
-        rootElem: result.tpl,
-        relUrl: relPrefix,
-      });
-    }
-    return this._tplRegistry.get(tag)!;
+/**
+ * 加载模板,加载组件配置并生成组件的实例和创建
+ */
+class Tpl{
+  private _tplJson = {} as  IElemJson;
+  private _relPrefix="";
+  private _loadDefer = new Defer();
+
+  constructor(private _tag: string) {
+    this._load();
+
   }
-})();
+  /**
+   * 从当前组件创建新的组件实例
+   * @param attrs 
+   * @returns 
+   */
+  createInstance(attrs: { [k: string]: string }) {
+    let comp = new WorkerComponent(this._tplJson.tag, attrs);
+    return comp;
+  }
+
+  private async _load(){
+    // 读取模板数据
+    this._relPrefix = workerMeta.tagPathPrefix(this._tag);
+    let tplUrl = this._relPrefix + '.html';
+    let html = await NetUtils.httpGetText(tplUrl);
+    // 请求主进程解析模板
+    let result = await WorkerMessage.templateParse.send({ text: html });
+    this._tplJson= result.tpl;
+
+    // 解析模板信息
+
+    this._loadDefer.reslove({});
+  }
+  get rootElem(){
+    return this._tplJson;
+  }
+  get relUrl(){
+    return this._relPrefix;
+  }
+
+  /**
+   * 等待模板加载和解析完成
+   */
+  async waitLoad() {
+    return this._loadDefer.result();
+  }
+}
+
+/**
+ * 管理所有模板的注册和加载
+ */
+class TplRegister {
+  private _tplRegistry = new Map<string, Tpl>();
+
+  async get(tag: string): Promise<Tpl> {
+    let tpl = this._tplRegistry.get(tag);
+    if(!tpl){
+      tpl = new Tpl(tag);
+      this._tplRegistry.set(tag,tpl)
+    }
+    await tpl.waitLoad();
+    return  tpl;
+  }
+}
+const tplRegistry = new TplRegister();
 
 // cid => WorkerComponent Map
 export const workerComponentRegistry = new Map<string, WorkerComponent>();
 
-type IScope = { [k: string]: any };
 
 /**
  * 属性处理的计算模式:
@@ -130,18 +179,18 @@ class WTextNode {
   constructor(private _elem: WElem, private _tplText: string, calcMode?: string) {
 
     try {
-        if (calcMode == '$') {
-          // 值绑定
-          this._computeFunc = new Function('$scope', '$el', `with($scope){return ${_tplText}}`);
-        } else if (calcMode == ':') {
-          // 模板绑定
-          this._computeFunc = new Function('$scope', '$el', `with($scope){return \`${_tplText}\`;}`);
-        } else{
-            this._value = _tplText;
-        }
-      } catch (e: any) {
-        log.warn('Error create compute function:', _tplText, e.message);
+      if (calcMode == '$') {
+        // 值绑定
+        this._computeFunc = new Function('$scope', '$el', `with($scope){return ${_tplText}}`);
+      } else if (calcMode == ':') {
+        // 模板绑定
+        this._computeFunc = new Function('$scope', '$el', `with($scope){return \`${_tplText}\`;}`);
+      } else {
+        this._value = _tplText;
       }
+    } catch (e: any) {
+      log.warn('Error create compute function:', _tplText, e.message);
+    }
 
   }
 
@@ -161,7 +210,7 @@ class WTextNode {
 }
 
 class WEvent {
-  constructor(private _elem: WElem, private _eventName: string, private _tplEvent: string) {}
+  constructor(private _elem: WElem, private _eventName: string, private _tplEvent: string) { }
 }
 
 // 一次性将变动内容和需要变动的组件和组件内部数据全部计算,一次性更新
@@ -241,7 +290,7 @@ class WElem {
     // 首先查找是否已经注册
     // 如果未注册则请求主线程确定是否自定义组件已经注册(可能第三方已经注册),并注册和加载组件
     let result = await WorkerMessage.registerComponent.send({
-  
+
       relUrl: this._componentRoot.relUrl,
       tag: this._tag,
       attrs: JsUtils.objectMap(this._attrs, (v, k) => {
@@ -261,6 +310,9 @@ class WElem {
         }
       });
     }
+  }
+  isRoot(): boolean {
+    return !(this._parentElem != undefined);
   }
 
   get tag() {
@@ -298,7 +350,10 @@ class WElem {
       if (child instanceof WTextNode) {
         outStringBuilder.push(child.value);
       } else {
-        child.renderOuterHtml(outStringBuilder);
+        // 检测是否为script元素,如果是script元素,则不生成HTML
+        if (child.tag == 'script' && child._attrs['scope']) {
+          return;
+        } else child.renderOuterHtml(outStringBuilder);
       }
     });
   }
@@ -323,7 +378,10 @@ export class WorkerComponent {
 
   constructor(public rootTag: string, private _attrs: { [k: string]: string }) {
     this._cid = _attrs['_cid'];
-    if (!this._cid) throw new Error('WorkerComponent must have _cid attribute');
+    if (!this._cid) {
+      log.error("'WorkerComponent must have _cid attribute:", rootTag, _attrs);
+      return;
+    }
     workerComponentRegistry.set(this._cid, this);
   }
   get workScope() {
@@ -348,6 +406,7 @@ export class WorkerComponent {
       log.error('load component:', this.rootTag, '"root element must be <template>"');
       return;
     }
+
     this._interRootElem = new WElem(this, undefined, tpl.rootElem);
     return this._interRootElem.waitLoad();
   }

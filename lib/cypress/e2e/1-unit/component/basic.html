@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>WOO</title>
+    <meta name="woo:cache" enable="1" />
+
+    <style>
+      html,body{
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        margin: 0;        
+      }
+      html{
+        overflow: hidden;
+        color: black;
+      }
+      body{
+        transition: all 0.5s;
+        /* visibility: hidden; */
+        /* transform: translateX(100%); */
+        overflow-y: auto;
+      }
+      body[_ready]{
+        visibility: visible;
+        transform: translateX(0);
+      }
+
+    </style>
+    <!-- <script src="../build/index.js"></script> -->
+
+  </head>
+
+  <body>
+    <h1>WOO</h1>
+    <p>Welcome to WOO</p>
+    <app- a1="11111" a2="222222"></app->
+    <!-- <com-test b1="1" b2="2">
+      <h2>HH2</h2>
+      <ddd>DDD</ddd>
+    </com-test>
+    <div id="aa">
+      <test_app-></test_app->
+    </div>
+    <test_app-></test_app-> -->
+  </body>
+</html>
